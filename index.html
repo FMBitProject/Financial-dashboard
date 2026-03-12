@@ -6,6 +6,226 @@
 <title>Family Financial Dashboard – Ferel & Maria</title>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script type="module">
+// ── FIREBASE SETUP ──────────────────────────────────────────────
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getDatabase, ref, set, get, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyD7Aow1HDWbys02Xj35iNMeeo4ATJQ9uGE",
+  authDomain: "financialdashboard11.firebaseapp.com",
+  databaseURL: "https://financialdashboard11-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "financialdashboard11",
+  storageBucket: "financialdashboard11.firebasestorage.app",
+  messagingSenderId: "20704014903",
+  appId: "1:20704014903:web:cb2c318984b470dca885b2"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+// ── SAVE HELPERS ────────────────────────────────────────────────
+let saveTimer = {};
+function scheduleSave(person) {
+  clearTimeout(saveTimer[person]);
+  saveTimer[person] = setTimeout(() => saveData(person), 1200);
+  showSaveStatus(person, 'saving');
+}
+
+function showSaveStatus(person, status) {
+  const el = document.getElementById(person + '-save-status');
+  if (!el) return;
+  if (status === 'saving') {
+    el.textContent = '⏳ Menyimpan...';
+    el.style.color = '#d97706';
+  } else if (status === 'saved') {
+    el.textContent = '✅ Tersimpan';
+    el.style.color = '#059669';
+    setTimeout(() => { el.textContent = ''; }, 3000);
+  } else if (status === 'error') {
+    el.textContent = '❌ Gagal simpan';
+    el.style.color = '#e11d48';
+  }
+}
+
+// ── COLLECT ALL DATA ────────────────────────────────────────────
+function collectData(p) {
+  const data = {};
+
+  // Summary cards
+  data.heroNw   = document.getElementById(p + '-hero-nw')?.value || '';
+  data.scNw     = document.getElementById(p + '-sc-nw')?.value || '';
+  data.scIn     = document.getElementById(p + '-sc-in')?.value || '';
+  data.scOut    = document.getElementById(p + '-sc-out')?.value || '';
+  data.scLiq    = document.getElementById(p + '-sc-liq')?.value || '';
+
+  // Assets
+  data.assets = [];
+  for (let i = 0; i < 5; i++) {
+    const av   = document.getElementById(p + '-av-' + i)?.value || 'Rp 0';
+    const tsel = document.getElementById(p + '-tsel-' + i)?.value || '';
+    const tinp = document.getElementById(p + '-tinp-' + i)?.value || '';
+    const obsel = document.getElementById(p + '-obsel-' + i)?.value || '';
+    data.assets.push({ av, tsel, tinp, obsel });
+  }
+
+  // Wallets
+  data.wallets = [];
+  const wItems = document.querySelectorAll('#' + p + '-wallet-list .wallet-item');
+  wItems.forEach(item => {
+    const id = item.id; // e.g. f-wi-0
+    const idx = id.split('-').pop();
+    const wtype = document.getElementById(p + '-wtype-' + idx)?.value || '0';
+    const wbank = document.getElementById(p + '-wbank-' + idx)?.value || '';
+    const wbal  = document.getElementById(p + '-wbal-' + idx)?.value || 'Rp 0';
+    data.wallets.push({ wtype, wbank, wbal });
+  });
+
+  // Cashflow weeks
+  const cfChart = p === 'f' ? window._fChart : window._mChart;
+  const weekCount = cfChart ? cfChart.data.labels.length : 0;
+  data.cashflow = [];
+  for (let i = 0; i < weekCount; i++) {
+    const cfi = document.getElementById(p + '-cfi-' + i)?.value || '0';
+    const cfo = document.getElementById(p + '-cfo-' + i)?.value || '0';
+    data.cashflow.push({ cfi, cfo });
+  }
+
+  // Transactions
+  data.transactions = [];
+  for (let i = 0; i < 5; i++) {
+    const desc  = document.getElementById(p + '-txdesc-' + i)?.value || '';
+    const dateEl = document.getElementById(p + '-txdate-' + i);
+    const date  = dateEl ? dateEl.dataset.iso || '' : '';
+    const dateTxt = dateEl ? dateEl.textContent.trim() : '';
+    const cat   = document.getElementById(p + '-txcat-' + i)?.value || '';
+    const type  = document.getElementById(p + '-txtype-' + i)?.value || 'in';
+    const amt   = document.getElementById(p + '-txamt-' + i)?.value || 'Rp 0';
+    const note  = document.getElementById(p + '-txnote-' + i)?.value || '';
+    data.transactions.push({ desc, date, dateTxt, cat, type, amt, note });
+  }
+
+  return data;
+}
+
+// ── SAVE TO FIREBASE ────────────────────────────────────────────
+async function saveData(person) {
+  try {
+    const data = collectData(person);
+    await set(ref(db, 'dashboard/' + person), data);
+    showSaveStatus(person, 'saved');
+  } catch (e) {
+    console.error('Save error:', e);
+    showSaveStatus(person, 'error');
+  }
+}
+
+// ── LOAD FROM FIREBASE ──────────────────────────────────────────
+async function loadData(person) {
+  try {
+    const snapshot = await get(ref(db, 'dashboard/' + person));
+    if (!snapshot.exists()) return;
+    const data = snapshot.val();
+
+    // Summary
+    if (data.heroNw) document.getElementById(person + '-hero-nw').value = data.heroNw;
+    if (data.scNw)   document.getElementById(person + '-sc-nw').value   = data.scNw;
+    if (data.scIn)   document.getElementById(person + '-sc-in').value   = data.scIn;
+    if (data.scOut)  document.getElementById(person + '-sc-out').value  = data.scOut;
+    if (data.scLiq)  document.getElementById(person + '-sc-liq').value  = data.scLiq;
+
+    // Assets
+    if (data.assets) {
+      data.assets.forEach((a, i) => {
+        const avEl = document.getElementById(person + '-av-' + i);
+        if (avEl && a.av) avEl.value = a.av;
+        const tselEl = document.getElementById(person + '-tsel-' + i);
+        if (tselEl && a.tsel) { tselEl.value = a.tsel; }
+        const tinpEl = document.getElementById(person + '-tinp-' + i);
+        if (tinpEl && a.tinp) { tinpEl.value = a.tinp; tinpEl.style.display = 'inline-block'; }
+        const obselEl = document.getElementById(person + '-obsel-' + i);
+        if (obselEl && a.obsel) {
+          obselEl.value = a.obsel;
+          window.onObliSel && window.onObliSel(person, i);
+        }
+      });
+      window.updateAsset && window.updateAsset(person);
+    }
+
+    // Wallets — rebuild
+    if (data.wallets && data.wallets.length > 0) {
+      const wList = document.getElementById(person + '-wallet-list');
+      wList.innerHTML = '';
+      window.wCount[person] = 0;
+      data.wallets.forEach(w => {
+        window.addWallet(person);
+        const idx = window.wCount[person] - 1;
+        const wtypeEl = document.getElementById(person + '-wtype-' + idx);
+        if (wtypeEl) { wtypeEl.value = w.wtype; window.onWType(person, idx); }
+        const wbankEl = document.getElementById(person + '-wbank-' + idx);
+        if (wbankEl) wbankEl.value = w.wbank;
+        const wbalEl  = document.getElementById(person + '-wbal-' + idx);
+        if (wbalEl) wbalEl.value = w.wbal;
+      });
+      window.updateWTotal && window.updateWTotal(person);
+    }
+
+    // Cashflow
+    if (data.cashflow) {
+      data.cashflow.forEach((c, i) => {
+        const cfi = document.getElementById(person + '-cfi-' + i);
+        const cfo = document.getElementById(person + '-cfo-' + i);
+        if (cfi) cfi.value = c.cfi;
+        if (cfo) cfo.value = c.cfo;
+      });
+      window.updateCashflow && window.updateCashflow(person);
+    }
+
+    // Transactions
+    if (data.transactions) {
+      data.transactions.forEach((t, i) => {
+        const descEl = document.getElementById(person + '-txdesc-' + i);
+        if (descEl) descEl.value = t.desc;
+        const dateEl = document.getElementById(person + '-txdate-' + i);
+        if (dateEl && t.date) {
+          dateEl.dataset.iso = t.date;
+          const calSvg = '<svg viewBox="0 0 24 24" style="width:10px;height:10px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>';
+          dateEl.innerHTML = calSvg + ' ' + (t.dateTxt || t.date);
+        }
+        const catEl  = document.getElementById(person + '-txcat-' + i);
+        if (catEl && t.cat) catEl.value = t.cat;
+        const typeEl = document.getElementById(person + '-txtype-' + i);
+        if (typeEl && t.type) {
+          typeEl.value = t.type;
+          const inCls = person === 'f' ? 'tx-in-f' : 'tx-in-m';
+          window.setTxType && window.setTxType(person, i, inCls);
+        }
+        const amtEl  = document.getElementById(person + '-txamt-' + i);
+        if (amtEl && t.amt) amtEl.value = t.amt;
+        const noteEl = document.getElementById(person + '-txnote-' + i);
+        if (noteEl && t.note) noteEl.value = t.note;
+      });
+      window.recalc && window.recalc(person);
+    }
+
+    console.log('✅ Data ' + person + ' loaded from Firebase');
+  } catch (e) {
+    console.error('Load error:', e);
+  }
+}
+
+// ── EXPOSE FIREBASE FUNCTIONS TO GLOBAL ────────────────────────
+window.fbSave = scheduleSave;
+window.fbLoad = loadData;
+
+// ── AUTO LOAD ON START ──────────────────────────────────────────
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    loadData('f');
+    loadData('m');
+  }, 800);
+});
+</script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -311,15 +531,21 @@ main{padding:0 28px 48px;max-width:1340px;margin:0 auto}
         <div class="hero-nw-label">TOTAL NET WORTH</div>
         <div class="hero-nw-val"><input class="editable editable-ferel" id="f-hero-nw" type="text" value="Rp 0"/></div>
         <div class="hero-nw-sub">Aset + Kas Likuid</div>
+        <div id="f-save-status" style="font-size:10px;font-weight:600;margin-top:5px;min-height:14px;color:rgba(255,255,255,0.85)"></div>
       </div>
     </div>
   </div>
   <main>
     <div class="section-label" style="display:flex;align-items:center;justify-content:space-between">
       <span>Ringkasan Keuangan</span>
-      <button class="recalc-btn recalc-f" onclick="recalc('f')">
-        <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Hitung Ulang
-      </button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="recalc-btn recalc-f" onclick="window.fbSave&&window.fbSave('f')" style="background:#1d4ed8;color:#fff;border-color:#1d4ed8;gap:5px">
+          <svg viewBox="0 0 24 24" style="width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Simpan
+        </button>
+        <button class="recalc-btn recalc-f" onclick="recalc('f')">
+          <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Hitung Ulang
+        </button>
+      </div>
     </div>
     <div class="summary-grid section-gap">
       <div class="summary-card sc-nw-f"><div class="sc-top"><span class="sc-label">Total Net Worth</span><div class="sc-icon"><svg viewBox="0 0 24 24"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg></div></div><div class="sc-value"><input class="editable editable-ferel" id="f-sc-nw" type="text" value="Rp 0"/></div><div class="sc-desc">Aset Investasi + Kas Likuid</div></div>
@@ -375,13 +601,19 @@ main{padding:0 28px 48px;max-width:1340px;margin:0 auto}
         <div class="hero-nw-label">TOTAL NET WORTH</div>
         <div class="hero-nw-val"><input class="editable editable-maria" id="m-hero-nw" type="text" value="Rp 0"/></div>
         <div class="hero-nw-sub">Aset + Kas Likuid</div>
+        <div id="m-save-status" style="font-size:10px;font-weight:600;margin-top:5px;min-height:14px;color:rgba(255,255,255,0.85)"></div>
       </div>
     </div>
   </div>
   <main>
     <div class="section-label" style="display:flex;align-items:center;justify-content:space-between">
       <span>Ringkasan Keuangan</span>
-      <button class="recalc-btn recalc-m" onclick="recalc('m')"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Hitung Ulang</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="recalc-btn recalc-m" onclick="window.fbSave&&window.fbSave('m')" style="background:#9d174d;color:#fff;border-color:#9d174d;gap:5px">
+          <svg viewBox="0 0 24 24" style="width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Simpan
+        </button>
+        <button class="recalc-btn recalc-m" onclick="recalc('m')"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Hitung Ulang</button>
+      </div>
     </div>
     <div class="summary-grid section-gap">
       <div class="summary-card sc-nw-m"><div class="sc-top"><span class="sc-label">Total Net Worth</span><div class="sc-icon"><svg viewBox="0 0 24 24"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg></div></div><div class="sc-value"><input class="editable editable-maria" id="m-sc-nw" type="text" value="Rp 0"/></div><div class="sc-desc">Aset Investasi + Kas Likuid</div></div>
@@ -574,7 +806,17 @@ function updateAsset(p){const vals=ASSET_DEFS.map((_,i)=>parseRp(document.getEle
 
 function recalc(p){const inv=parseRp(document.getElementById(p+'-sc-in').value);const outv=parseRp(document.getElementById(p+'-sc-out').value);const net=inv-outv;const el=document.getElementById(p+'-tx-net');el.textContent=(net>=0?'+':'')+fmt(net);el.style.color=net>=0?'var(--green)':'var(--red)';}
 
-// INIT
+// INIT - expose to window for Firebase integration
+window.wCount = wCount;
+window.addWallet = addWallet;
+window.onWType = onWType;
+window.updateWTotal = updateWTotal;
+window.updateAsset = updateAsset;
+window.updateCashflow = updateCashflow;
+window.onObliSel = onObliSel;
+window.setTxType = setTxType;
+window.recalc = recalc;
+
 buildAssets('f','editable-ferel');
 buildAssets('m','editable-maria');
 ['f','m'].forEach(p=>{
@@ -584,6 +826,8 @@ buildAssets('m','editable-maria');
 });
 fChart=buildCashflow('f');
 mChart=buildCashflow('m');
+window._fChart = fChart;
+window._mChart = mChart;
 buildTransactions('f','tx-in-f');
 buildTransactions('m','tx-in-m');
 fDonut=buildDonut('f');
